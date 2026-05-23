@@ -1838,6 +1838,22 @@ class Scheduler(
                     recv_req.bootstrap_room is None
                     and self.transfer_backend != TransferBackend.FAKE
                 ):
+                    # Health check probes never carry bootstrap_room. Returning BAD_REQUEST
+                    # here would cause the PD router to mark this node as unhealthy, stopping
+                    # it from routing user requests and leaving decode stuck in
+                    # KVPoll.WaitingForInput.
+                    # Send the health check response immediately rather than deferring via
+                    # return_health_check_ipcs, because maybe_send_health_check_signal() is
+                    # only called from process_batch_result — if the server is idle (no batch
+                    # running), the response would never be delivered and the HTTP worker
+                    # would time out, reproducing the same router failure through a different
+                    # mechanism.
+                    if is_health_check_generate_req(recv_req):
+                        self.return_health_check_ipcs.append(
+                            getattr(recv_req, "http_worker_ipc", None)
+                        )
+                        self.maybe_send_health_check_signal()
+                        return
                     error_msg = (
                         f"Invalid request: Disaggregated request received without "
                         f"bootstrap room id. {req.rid=}"

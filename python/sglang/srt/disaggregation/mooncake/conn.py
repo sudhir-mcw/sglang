@@ -1348,9 +1348,21 @@ class MooncakeKVManager(CommonKVManager):
                     continue
                 mooncake_session_id = waiting_req_bytes[3].decode("ascii")
                 if room == "None":
-                    self.decode_kv_args_table[mooncake_session_id] = (
-                        KVArgsRegisterInfo.from_zmq(waiting_req_bytes)
-                    )
+                    reg_info = KVArgsRegisterInfo.from_zmq(waiting_req_bytes)
+                    if (
+                        reg_info.enable_hisparse
+                        and self.server_args.enable_hierarchical_cache
+                    ):
+                        logger.warning(
+                            "Detected HiCache (prefill) + HiSparse (decode) in PD "
+                            "disaggregation. NSA index_k_with_scale_buffer data will "
+                            "be written at logical page positions, but the decode-side "
+                            "attention kernel reads from physical hisparse device "
+                            "positions — these do not match. Sparse attention index "
+                            "data may be incorrect for session %s.",
+                            mooncake_session_id,
+                        )
+                    self.decode_kv_args_table[mooncake_session_id] = reg_info
                     with self.session_lock:
                         if mooncake_session_id in self.failed_sessions:
                             self.failed_sessions.remove(mooncake_session_id)
